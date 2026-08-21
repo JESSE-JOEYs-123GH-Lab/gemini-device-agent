@@ -16,7 +16,6 @@ class GeminiAgent {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    // Tool definitie één keer globaal opslaan zodat hij overal mee kan
     private val toolsArray = JSONArray().put(JSONObject().put("functionDeclarations", JSONArray().put(JSONObject().apply {
         put("name", "run_shell_command")
         put("description", "Voert een Android shell commando uit.")
@@ -49,7 +48,6 @@ class GeminiAgent {
                 val toolPayload = buildToolResponsePayload(userPrompt, functionCall, result)
                 
                 val finalResponse = executeApiCall(endpoint, toolPayload)
-                // Check voor crash-fout bij de tweede call toegevoegd
                 if (finalResponse.startsWith("HTTP_ERROR_")) return@withContext "Netwerkfout bij tool: $finalResponse"
                 
                 return@withContext JSONObject(finalResponse).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "Commando uitgevoerd: $result"
@@ -71,9 +69,9 @@ class GeminiAgent {
             put("contents", JSONArray().apply {
                 put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
                 put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("functionCall", functionCall))))
-                put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("result", result))))))
+                // Hier is de rol gecorrigeerd naar "function"
+                put(JSONObject().put("role", "function").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("result", result))))))
             })
-            // Tool definitie nu ook hier toegevoegd
             put("tools", toolsArray)
         }
     }
