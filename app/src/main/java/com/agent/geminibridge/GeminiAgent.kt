@@ -9,14 +9,22 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
-class GeminiAgent(private val apiKey: String) {
+class GeminiAgent {
     private val client = OkHttpClient()
-    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=$apiKey"
 
-    suspend fun processPrompt(userPrompt: String): String = withContext(Dispatchers.IO) {
+    suspend fun processPrompt(apiKey: String, userPrompt: String): String = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext "Fout: Geen API key ingevuld!"
+
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+
         try {
             val payload = buildRequestPayload(userPrompt)
-            val initialResponse = executeApiCall(payload)
+            val initialResponse = executeApiCall(endpoint, payload)
+            
+            if (initialResponse.startsWith("HTTP_ERROR_")) {
+                return@withContext "Serverfout van Google:\n$initialResponse"
+            }
+
             val jsonResponse = JSONObject(initialResponse)
 
             if (jsonResponse.has("error")) {
@@ -27,13 +35,14 @@ class GeminiAgent(private val apiKey: String) {
             val candidate = jsonResponse.optJSONArray("candidates")?.optJSONObject(0)
             val content = candidate?.optJSONObject("content")
             val parts = content?.optJSONArray("parts")
-            val functionCall = parts?.optJSONObject(0)?.optJSONObject("functionCall")
+            val firstPart = parts?.optJSONObject(0)
 
+            val functionCall = firstPart?.optJSONObject("functionCall")
             if (functionCall != null && functionCall.optString("name") == "run_shell_command") {
                 val commandToRun = functionCall.getJSONObject("args").getString("command")
                 val executionResult = ShellBridge.execute(commandToRun)
                 val toolResponsePayload = buildToolResponsePayload(userPrompt, functionCall, executionResult)
-                val finalApiResponse = executeApiCall(toolResponsePayload)
+                val finalApiResponse = executeApiCall(endpoint, toolResponsePayload)
                 val finalJson = JSONObject(finalApiResponse)
                 
                 if (finalJson.has("error")) {
@@ -44,10 +53,10 @@ class GeminiAgent(private val apiKey: String) {
                 val finalParts = finalJson.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
                 return@withContext finalParts?.optJSONObject(0)?.optString("text") ?: "Commando uitgevoerd:\n$executionResult"
             } else {
-                return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Geen tekst in antwoord: $initialResponse"
+                return@withContext firstPart?.optString("text") ?: "Antwoord:\n$initialResponse"
             }
         } catch (e: Exception) {
-            return@withContext "Fout: ${e.localizedMessage ?: e.message}"
+            return@withContext "App Fout: ${e.localizedMessage ?: e.message}"
         }
     }
 
@@ -94,11 +103,16 @@ class GeminiAgent(private val apiKey: String) {
         }
     }
 
-    private fun executeApiCall(payload: JSONObject): String {
+    private fun executeApiCall(url: String, payload: JSONObject): String {
         val body = payload.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(endpoint).post(body).build()
+        val request = Request.Builder().url(url).post(body).build()
         client.newCall(request).execute().use { response ->
-            return response.body?.string() ?: "{}"
+            val resBody = response.body?.string() ?: ""
+            return if (!response.isSuccessful) {
+                "HTTP_ERROR_${response.code}: $resBody"
+            } else {
+                resBody
+            }
         }
     }
 }

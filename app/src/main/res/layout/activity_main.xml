@@ -9,8 +9,16 @@
         android:id="@+id/txtStatus"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Status: Bezig met verbinden..."
+        android:text="Shizuku Status: Controleren..."
         android:textStyle="bold" />
+
+    <EditText
+        android:id="@+id/edtApiKey"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Plak hier je Gemini API Key"
+        android:textSize="12sp"
+        android:singleLine="true" />
 
     <ScrollView
         android:layout_width="match_parent"
@@ -21,7 +29,7 @@
             android:id="@+id/txtLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Console geopend..." />
+            android:text="Console geopend...\n" />
     </ScrollView>
 
     <EditText
