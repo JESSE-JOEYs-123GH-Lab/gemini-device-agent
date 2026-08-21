@@ -11,26 +11,43 @@ import org.json.JSONObject
 
 class GeminiAgent(private val apiKey: String) {
     private val client = OkHttpClient()
-    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
 
     suspend fun processPrompt(userPrompt: String): String = withContext(Dispatchers.IO) {
-        val payload = buildRequestPayload(userPrompt)
-        val initialResponse = executeApiCall(payload)
-        val jsonResponse = JSONObject(initialResponse)
-        val candidate = jsonResponse.optJSONArray("candidates")?.optJSONObject(0)
-        val content = candidate?.optJSONObject("content")
-        val parts = content?.optJSONArray("parts")
-        val functionCall = parts?.optJSONObject(0)?.optJSONObject("functionCall")
+        try {
+            val payload = buildRequestPayload(userPrompt)
+            val initialResponse = executeApiCall(payload)
+            val jsonResponse = JSONObject(initialResponse)
 
-        if (functionCall != null && functionCall.getString("name") == "run_shell_command") {
-            val commandToRun = functionCall.getJSONObject("args").getString("command")
-            val executionResult = ShellBridge.execute(commandToRun)
-            val toolResponsePayload = buildToolResponsePayload(userPrompt, functionCall, executionResult)
-            val finalApiResponse = executeApiCall(toolResponsePayload)
-            val finalJson = JSONObject(finalApiResponse)
-            return@withContext finalJson.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-        } else {
-            return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Geen response ontvangen."
+            if (jsonResponse.has("error")) {
+                val errObj = jsonResponse.getJSONObject("error")
+                return@withContext "API Fout (${errObj.optInt("code")}): ${errObj.optString("message")}"
+            }
+
+            val candidate = jsonResponse.optJSONArray("candidates")?.optJSONObject(0)
+            val content = candidate?.optJSONObject("content")
+            val parts = content?.optJSONArray("parts")
+            val functionCall = parts?.optJSONObject(0)?.optJSONObject("functionCall")
+
+            if (functionCall != null && functionCall.optString("name") == "run_shell_command") {
+                val commandToRun = functionCall.getJSONObject("args").getString("command")
+                val executionResult = ShellBridge.execute(commandToRun)
+                val toolResponsePayload = buildToolResponsePayload(userPrompt, functionCall, executionResult)
+                val finalApiResponse = executeApiCall(toolResponsePayload)
+                val finalJson = JSONObject(finalApiResponse)
+                
+                if (finalJson.has("error")) {
+                    val errObj = finalJson.getJSONObject("error")
+                    return@withContext "Tool API Fout: ${errObj.optString("message")}"
+                }
+                
+                val finalParts = finalJson.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                return@withContext finalParts?.optJSONObject(0)?.optString("text") ?: "Commando uitgevoerd:\n$executionResult"
+            } else {
+                return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Geen tekst in antwoord: $initialResponse"
+            }
+        } catch (e: Exception) {
+            return@withContext "Fout: ${e.localizedMessage ?: e.message}"
         }
     }
 
