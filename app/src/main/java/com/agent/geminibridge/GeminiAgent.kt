@@ -11,7 +11,7 @@ import org.json.JSONObject
 
 class GeminiAgent(private val apiKey: String) {
     private val client = OkHttpClient()
-    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+    private val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent?key=$apiKey"
 
     suspend fun processPrompt(userPrompt: String): String = withContext(Dispatchers.IO) {
         try {
