@@ -15,7 +15,7 @@ class GeminiAgent {
     suspend fun processPrompt(apiKey: String, userPrompt: String): String = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext "Fout: Geen API key ingevuld!"
 
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=$apiKey"
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$apiKey"
 
         try {
             val payload = buildRequestPayload(userPrompt)
