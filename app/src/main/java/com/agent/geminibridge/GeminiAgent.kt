@@ -61,7 +61,7 @@ class GeminiAgent {
                     put("contents", JSONArray().apply {
                         put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", userPrompt))))
                         put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("functionCall", functionCall))))
-                        put(JSONObject().put("role", "function").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("result", result))))))
+                        put(JSONObject().put("role", "function").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("output", result))))))
                     })
                     put("tools", toolsArray)
                 }
