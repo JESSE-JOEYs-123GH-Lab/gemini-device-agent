@@ -14,6 +14,7 @@ class GeminiAgent {
     private val client = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val toolsArray = JSONArray().put(JSONObject().put("functionDeclarations", JSONArray().put(JSONObject().apply {
@@ -29,15 +30,25 @@ class GeminiAgent {
     }))))
 
     suspend fun processPrompt(apiKey: String, userPrompt: String): String = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext "Fout: API sleutel mist."
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$apiKey"
-        
+
         try {
-            val payload = buildRequestPayload(userPrompt)
-            val response = executeApiCall(endpoint, payload)
+            val payload = JSONObject().apply {
+                put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", userPrompt)))))
+                put("tools", toolsArray)
+            }
             
-            if (response.startsWith("HTTP_ERROR_")) return@withContext "Netwerkfout: $response"
+            val body = payload.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(endpoint).post(body).build()
             
-            val jsonResponse = JSONObject(response)
+            var responseData = ""
+            client.newCall(request).execute().use { response ->
+                responseData = response.body?.string() ?: ""
+                if (!response.isSuccessful) return@withContext "API Fout (${response.code}): $responseData"
+            }
+            
+            val jsonResponse = JSONObject(responseData)
             val candidate = jsonResponse.optJSONArray("candidates")?.optJSONObject(0)
             val parts = candidate?.optJSONObject("content")?.optJSONArray("parts")
             val functionCall = parts?.optJSONObject(0)?.optJSONObject("functionCall")
@@ -45,43 +56,33 @@ class GeminiAgent {
             if (functionCall != null) {
                 val command = functionCall.getJSONObject("args").getString("command")
                 val result = ShellBridge.execute(command)
-                val toolPayload = buildToolResponsePayload(userPrompt, functionCall, result)
                 
-                val finalResponse = executeApiCall(endpoint, toolPayload)
-                if (finalResponse.startsWith("HTTP_ERROR_")) return@withContext "Netwerkfout bij tool: $finalResponse"
+                val toolPayload = JSONObject().apply {
+                    put("contents", JSONArray().apply {
+                        put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", userPrompt))))
+                        put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("functionCall", functionCall))))
+                        put(JSONObject().put("role", "function").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("result", result))))))
+                    })
+                    put("tools", toolsArray)
+                }
                 
-                return@withContext JSONObject(finalResponse).optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "Commando uitgevoerd: $result"
+                val toolBody = toolPayload.toString().toRequestBody("application/json".toMediaType())
+                val toolRequest = Request.Builder().url(endpoint).post(toolBody).build()
+                
+                var finalResponseData = ""
+                client.newCall(toolRequest).execute().use { response ->
+                    finalResponseData = response.body?.string() ?: ""
+                    if (!response.isSuccessful) return@withContext "API Fout Tool (${response.code}): $finalResponseData"
+                }
+                
+                val finalJson = JSONObject(finalResponseData)
+                return@withContext finalJson.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")?.optJSONObject(0)?.optString("text") ?: "Commando uitgevoerd:\n$result"
             }
             
-            return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Geen antwoord."
-        } catch (e: Exception) { return@withContext "Fout: ${e.message}" }
-    }
-
-    private fun buildRequestPayload(prompt: String): JSONObject {
-        return JSONObject().apply {
-            put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))))
-            put("tools", toolsArray)
-        }
-    }
-
-    private fun buildToolResponsePayload(prompt: String, functionCall: JSONObject, result: String): JSONObject {
-        return JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt))))
-                put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("functionCall", functionCall))))
-                // Hier is de rol gecorrigeerd naar "function"
-                put(JSONObject().put("role", "function").put("parts", JSONArray().put(JSONObject().put("functionResponse", JSONObject().put("name", "run_shell_command").put("response", JSONObject().put("result", result))))))
-            })
-            put("tools", toolsArray)
-        }
-    }
-
-    private fun executeApiCall(url: String, payload: JSONObject): String {
-        val body = payload.toString().toRequestBody("application/json".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
-        client.newCall(request).execute().use { response -> 
-            val resBody = response.body?.string() ?: ""
-            return if (!response.isSuccessful) "HTTP_ERROR_${response.code}: $resBody" else resBody
+            return@withContext parts?.optJSONObject(0)?.optString("text") ?: "Geen tekst in antwoord."
+            
+        } catch (e: Exception) {
+            return@withContext "Fout: ${e.message}"
         }
     }
 }
